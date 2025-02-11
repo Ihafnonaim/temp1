@@ -730,8 +730,15 @@ if __name__ == '__main__':
             nets_this_round = {k: nets[k] for k in party_list_this_round}
             for net in nets_this_round.values():
                 net.load_state_dict(global_w)
+            # Ensure model is instantiated before calling local_train_net
+            if args.model == "simple-cnn":
+                global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+            else:  raise ValueError(f"Unsupported model: {args.model}")
 
-            local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, device=device)
+# Proceed with training
+            local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model=global_model, device=device)
+
+            # local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, device=device)
 
             total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
             fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
