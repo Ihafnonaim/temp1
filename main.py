@@ -171,10 +171,14 @@ def init_nets(net_configs, n_parties, args, device='cpu'):
         n_classes = 47
     elif args.dataset == 'xray':
         n_classes = 2
+
     if args.normal_model:
         for net_i in range(n_parties):
             if args.model == 'simple-cnn':
-                net = SimpleCNNMNIST(input_dim=(16 * 4 * 4), hidden_dims=[120, 84], output_dim=10)
+                if args.dataset == 'mnist':
+                    net = SimpleCNNMNIST(input_dim=(16 * 4 * 4), hidden_dims=[120, 84], output_dim=10)  # ✅ Use MNIST model
+                else:
+                    net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=10)  # ✅ Use CIFAR-10 model
             if device == 'cpu':
                 net.to(device)
             else:
@@ -726,6 +730,8 @@ if __name__ == '__main__':
 
 
     elif args.alg == 'fedavg':
+        global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+           
         for round in range(n_comm_rounds):
             logger.info("in comm round:" + str(round))
             party_list_this_round = party_list_rounds[round]
@@ -739,7 +745,7 @@ if __name__ == '__main__':
                 net.load_state_dict(global_w)
             # Ensure model is instantiated before calling local_train_net
             # if args.model == "simple-cnn":
-            global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+            # global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
             # else:  raise ValueError(f"Unsupported model: {args.model}")
 
 # Proceed with training
