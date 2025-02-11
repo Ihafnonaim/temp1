@@ -784,9 +784,9 @@ if __name__ == '__main__':
 
 
     elif args.alg == "fedavg":
-        global_model = ModelFedCon(args.model, 128, 10).to(device)
+        global_model = ModelFedCon(args.model, args.out_dim, 10).to(device)
     
-        for round in range(args.comm_rounds):
+        for round in range(args.comm_round):
             print(f"Communication Round {round+1}")
 
             local_models = []
