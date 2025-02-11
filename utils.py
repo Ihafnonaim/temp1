@@ -25,6 +25,31 @@ def mkdirs(dirpath):
         pass
 
 
+def fedavg_aggregate(global_model, client_models, num_samples):
+    """
+    Implements FedAvg aggregation.
+    
+    :param global_model: The global model to be updated.
+    :param client_models: List of client models after local training.
+    :param num_samples: List containing the number of samples used by each client.
+    """
+    total_samples = sum(num_samples)
+    new_state_dict = global_model.state_dict()
+
+    # Initialize averaged weights as zero
+    for key in new_state_dict.keys():
+        new_state_dict[key] = torch.zeros_like(new_state_dict[key])
+
+    # Perform weighted sum of client models
+    for client_model, n_samples in zip(client_models, num_samples):
+        client_state_dict = client_model.state_dict()
+        for key in client_state_dict.keys():
+            new_state_dict[key] += (client_state_dict[key] * (n_samples / total_samples))
+
+    # Load the averaged weights into the global model
+    global_model.load_state_dict(new_state_dict)
+    return global_model
+
 
 def load_cifar10_data(datadir):
     transform = transforms.Compose([transforms.ToTensor()])
