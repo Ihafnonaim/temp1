@@ -738,9 +738,9 @@ if __name__ == '__main__':
             for net in nets_this_round.values():
                 net.load_state_dict(global_w)
             # Ensure model is instantiated before calling local_train_net
-            if args.model == "simple-cnn":
-                global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
-            else:  raise ValueError(f"Unsupported model: {args.model}")
+            # if args.model == "simple-cnn":
+            global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+            # else:  raise ValueError(f"Unsupported model: {args.model}")
 
 # Proceed with training
             local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model=global_model, device=device)
