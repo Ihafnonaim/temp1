@@ -15,7 +15,8 @@ import tensorflow as tf
 
 from model import *
 from utils import *
-
+from utils import fedavg_aggregate
+import copy
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -269,6 +270,59 @@ def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_o
 
     logger.info(' ** Training complete **')
     return train_acc, test_acc
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+
+def train(model, train_loader, optimizer, epochs, device="cuda"):
+    """
+    Trains the given model on a client's local dataset.
+
+    Args:
+    - model: PyTorch model instance (client's model).
+    - train_loader: DataLoader for client's training data.
+    - optimizer: Optimizer for training.
+    - epochs: Number of local training epochs.
+    - device: Computation device (default: "cuda").
+
+    Returns:
+    - Trained model (weights are updated in-place).
+    """
+    model.train()
+    model.to(device)
+
+    criterion = nn.CrossEntropyLoss().to(device)
+
+    for epoch in range(epochs):
+        total_loss = 0.0
+        for batch_idx, (x, target) in enumerate(train_loader):
+            x, target = x.to(device), target.to(device)
+
+            optimizer.zero_grad()
+
+            # Extract features and logits from model
+            z_prev, z_present, logits = model(x)
+
+            # Compute classification loss
+            loss_ce = criterion(logits, target)
+
+            # Compute contrastive loss
+            loss_cl = contrastive_loss(z_prev, z_present, z_present)
+
+            # Total loss
+            loss = loss_ce + loss_cl
+
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(train_loader)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    return model
 
 
 def train_net_fedprox(net_id, net, global_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, mu, args,
@@ -729,67 +783,93 @@ if __name__ == '__main__':
                     torch.save({'pool'+ str(nets_id) + '_'+'net'+str(net_id): net.state_dict() for net_id, net in old_nets.items()}, args.modeldir+'fedcon/prev_model_pool_'+args.log_file_name+'.pth')
 
 
-    elif args.alg == 'fedavg':
-        global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+    elif args.alg == "fedavg":
+        global_model = ModelFedCon(args.base_model, args.out_dim, args.n_classes).to(device)
+    
+        for round in range(args.comm_rounds):
+            print(f"Communication Round {round+1}")
+
+            local_models = []
+            num_samples = []
+
+            for client in clients:
+                client_model = copy.deepcopy(global_model)
+                optimizer = torch.optim.Adam(client_model.parameters(), lr=args.lr)
+
+                train(client_model, client["train_loader"], optimizer, args.epochs)
+
+                local_models.append(client_model)
+                num_samples.append(len(client["train_loader"].dataset))
+
+        # Aggregate using FedAvg
+            global_model = fedavg_aggregate(global_model, local_models, num_samples)
+
+    # Final model evaluation
+        test_accuracy, test_loss = compute_accuracy(global_model, test_loader)
+        print(f"Final Test Accuracy: {test_accuracy}")
+
+
+    # elif args.alg == 'fedavg':
+    #     global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
            
-        for round in range(n_comm_rounds):
-            logger.info("in comm round:" + str(round))
-            party_list_this_round = party_list_rounds[round]
+    #     for round in range(n_comm_rounds):
+    #         logger.info("in comm round:" + str(round))
+    #         party_list_this_round = party_list_rounds[round]
 
-            global_w = global_model.state_dict()
-            if args.server_momentum:
-                old_w = copy.deepcopy(global_model.state_dict())
+    #         global_w = global_model.state_dict()
+    #         if args.server_momentum:
+#                 old_w = copy.deepcopy(global_model.state_dict())
 
-            nets_this_round = {k: nets[k] for k in party_list_this_round}
-            for net in nets_this_round.values():
-                net.load_state_dict(global_w)
-            # Ensure model is instantiated before calling local_train_net
-            # if args.model == "simple-cnn":
-            # global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
-            # else:  raise ValueError(f"Unsupported model: {args.model}")
+#             nets_this_round = {k: nets[k] for k in party_list_this_round}
+#             for net in nets_this_round.values():
+#                 net.load_state_dict(global_w)
+#             # Ensure model is instantiated before calling local_train_net
+#             # if args.model == "simple-cnn":
+#             # global_model = SimpleCNN(input_dim=16 * 5 * 5, hidden_dims=[120, 84], output_dim=10).to(device)
+#             # else:  raise ValueError(f"Unsupported model: {args.model}")
 
-# Proceed with training
-            local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model=global_model, device=device)
+# # Proceed with training
+#             local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, global_model=global_model, device=device)
 
-            # local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, device=device)
+#             # local_train_net(nets_this_round, args, net_dataidx_map, train_dl=train_dl, test_dl=test_dl, device=device)
 
-            total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
-            fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
+#             total_data_points = sum([len(net_dataidx_map[r]) for r in party_list_this_round])
+            # fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in party_list_this_round]
 
-            for net_id, net in enumerate(nets_this_round.values()):
-                net_para = net.state_dict()
-                if net_id == 0:
-                    for key in net_para:
-                        global_w[key] = net_para[key] * fed_avg_freqs[net_id]
-                else:
-                    for key in net_para:
-                        global_w[key] += net_para[key] * fed_avg_freqs[net_id]
-
-
-            if args.server_momentum:
-                delta_w = copy.deepcopy(global_w)
-                for key in delta_w:
-                    delta_w[key] = old_w[key] - global_w[key]
-                    moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key]
-                    global_w[key] = old_w[key] - moment_v[key]
+            # for net_id, net in enumerate(nets_this_round.values()):
+            #     net_para = net.state_dict()
+            #     if net_id == 0:
+            #         for key in net_para:
+            #             global_w[key] = net_para[key] * fed_avg_freqs[net_id]
+            #     else:
+            #         for key in net_para:
+            #             global_w[key] += net_para[key] * fed_avg_freqs[net_id]
 
 
-            global_model.load_state_dict(global_w)
+            # if args.server_momentum:
+            #     delta_w = copy.deepcopy(global_w)
+            #     for key in delta_w:
+            #         delta_w[key] = old_w[key] - global_w[key]
+            #         moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key]
+            #         global_w[key] = old_w[key] - moment_v[key]
 
-            #logger.info('global n_training: %d' % len(train_dl_global))
-            logger.info('global n_test: %d' % len(test_dl))
-            global_model.cuda()
-            train_acc, train_loss = compute_accuracy(global_model, train_dl_global, device=device)
-            test_acc, conf_matrix, _ = compute_accuracy(global_model, test_dl, get_confusion_matrix=True, device=device)
 
-            logger.info('>> Global Model Train accuracy: %f' % train_acc)
-            logger.info('>> Global Model Test accuracy: %f' % test_acc)
-            logger.info('>> Global Model Train loss: %f' % train_loss)
-            mkdirs(args.modeldir+'fedavg/')
-            global_model.to('cpu')
+            # global_model.load_state_dict(global_w)
 
-            torch.save(global_model.state_dict(), args.modeldir+'fedavg/'+'globalmodel'+args.log_file_name+'.pth')
-            torch.save(nets[0].state_dict(), args.modeldir+'fedavg/'+'localmodel0'+args.log_file_name+'.pth')
+            # #logger.info('global n_training: %d' % len(train_dl_global))
+            # logger.info('global n_test: %d' % len(test_dl))
+            # global_model.cuda()
+            # train_acc, train_loss = compute_accuracy(global_model, train_dl_global, device=device)
+            # test_acc, conf_matrix, _ = compute_accuracy(global_model, test_dl, get_confusion_matrix=True, device=device)
+
+            # logger.info('>> Global Model Train accuracy: %f' % train_acc)
+            # logger.info('>> Global Model Test accuracy: %f' % test_acc)
+            # logger.info('>> Global Model Train loss: %f' % train_loss)
+            # mkdirs(args.modeldir+'fedavg/')
+            # global_model.to('cpu')
+
+            # torch.save(global_model.state_dict(), args.modeldir+'fedavg/'+'globalmodel'+args.log_file_name+'.pth')
+            # torch.save(nets[0].state_dict(), args.modeldir+'fedavg/'+'localmodel0'+args.log_file_name+'.pth')
     elif args.alg == 'fedprox':
 
         for round in range(n_comm_rounds):
