@@ -150,8 +150,15 @@ def set_server_weights(server, client):
 
 def init_nets(net_configs, n_parties, args, device='cpu'):
     nets = {net_i: None for net_i in range(n_parties)}
-    if args.dataset in {'mnist', 'cifar10', 'svhn', 'fmnist'}:
+    # if args.dataset in {'mnist', 'cifar10', 'svhn', 'fmnist'}:
+    #     n_classes = 10
+    if args.dataset == 'mnist':
+        global_model = SimpleCNNMNIST(input_dim=16*4*4, hidden_dims=[120, 84], output_dim=10)
+    elif args.dataset == 'cifar10':
+        global_model = SimpleCNN(input_dim=16*5*5, hidden_dims=[120, 84], output_dim=10)
         n_classes = 10
+    # else:
+    # raise ValueError("Unsupported dataset")
     elif args.dataset == 'celeba':
         n_classes = 2
     elif args.dataset == 'cifar100':
